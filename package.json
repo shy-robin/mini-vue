@@ -1,13 +1,18 @@
 {
-  "name": "vue-source-learning",
+  "name": "mini-vue",
   "version": "1.0.0",
-  "description": "",
+  "description": "A vue-source-learning project",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "node scripts/dev.js reactivity -f global"
   },
   "keywords": [],
-  "author": "",
+  "author": "Shy Robin",
+  "bugs": "https://github.com/shy-robin/mini-vue/issues",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shy-robin/mini-vue.git"
+  },
   "license": "ISC",
   "dependencies": {
     "vue": "^3.2.38"

@@ -47,6 +47,8 @@ const total2 = numbers.reduce((memo, current) => {
 console.log(total2)
 ```
 
+
+
 ### 采用虚拟 DOM
 
 传统更新页面，拼凑成一个完整的字符串 innerHTML 全部更新渲染，添加虚拟 DOM 后，可以比较新旧虚拟节点，找到变化后再进行更新。虚拟 DOM 就是一个 Javascript 对象，用来描述真实 DOM。
@@ -69,12 +71,16 @@ const vnode = {
 }
 ```
 
+
+
 ### 区分编译时和运行时
 
 - 我们需要有一个虚拟 DOM，调用渲染方法将虚拟 DOM 渲染成真实 DOM（缺点就是虚拟 DOM 编写麻烦）；
 - 专门写个编译时可以将模板编译成虚拟 DOM（在构建的时候进行编译性能更高，不需要在运行的时候编译）。
 
 
+
+---
 
 ## Vue3 整体架构
 
@@ -86,6 +92,8 @@ Monorepo 是管理项目代码的一个方式，指在一个项目仓库（repo�
 
 - 一个仓库可维护多个模块，不用到处找仓库；
 - 方便版本管理和依赖管理，模块之间的引用和调用都非常方便。
+
+
 
 #### Vue3 项目结构
 
@@ -105,9 +113,13 @@ Monorepo 是管理项目代码的一个方式，指在一个项目仓库（repo�
 - ref-transform：实验性语法，ref 转化器；
 - size-check：用来测试代码体积；
 
+
+
 #### Vue3 采用 Typescript
 
 Vue2 采用 Flow 进行类型检测（Vue2 中对 Typescript 的支持并不友好），Vue3 源码采用 Typescript 来进行重写，对 Typescript 的支持更加友好。
+
+
 
 ### Vue3 开发环境搭建
 
@@ -157,4 +169,162 @@ pnpm install typescript minimist esbuild -D -w # minimist 用于读取命令行�
 ```
 
 
+
+#### 搭建开发环境
+
+1. 确定脚本开发命令格式（即传入指定的包名和打包的格式，进行打包，获取得到打包的产物）：
+
+   ```json
+   {
+     "scripts": {
+       "dev": "node scripts/dev.js reactivity -f global"
+     },
+   }
+   ```
+
+2. 在根目录下创建 scripts 目录，用于存放脚本文件，并在该目录下创建 dev.js 文件，用于执行开发时命令；
+
+   ```javascript
+   // 读取命令行参数
+   // console.log(process.argv)
+   /*
+     [
+       '/usr/local/bin/node',
+       '/Users/shyrobin/Vue/vue-source-learning/scripts/dev.js',
+       'reactivity',
+       '-f',
+       'global'
+     ]
+     分别对应 "node scripts/dev.js reactivity -f global" 这些参数
+   */
+   ```
+
+   但通过 `process.argv` 获取的参数比较直接，难以理解，可借用 `minimist` 库对参数进行解析处理：
+
+   ```javascript
+   const args = require('minimist')(process.argv.slice(2))
+   console.log(args) // { _: [ 'reactivity' ], f: 'global' }
+   
+   ```
+
+   这样，我们就可以获取到易读的参数数据，所有前面没有被 `-f` 修饰的参数都会放到 _ 这个数组中，而被修饰的参数则会放入到 f 中。
+
+   以下是完整代码：
+
+   ```javascript
+   // scripts/dev.js
+   const args = require('minimist')(process.argv.slice(2))
+   const { resolve } = require('path')
+   const { build } = require('esbuild')
+   
+   const target = args['_'][0] || 'reactivity' // 打包目录名
+   const format = args['f'] || 'global' // 打包格式
+   
+   const targetPath = resolve(__dirname, `../packages/${target}`) // 打包目录路径
+   
+   // 引入 target 目录下的 package.json
+   const pkg = require(`${targetPath}/package.json`)
+   /**
+    * 设置打包产物的模块格式。
+    * 1. iife
+    *    - 立即执行函数。如 (function() {})()；
+    *    - 通常会生成一个全局变量，浏览器可以访问该全局变量；
+    * 2. cjs
+    *    - CommonJS，Nodejs 中的模块规范，module.exports 导出，require 导入；
+    * 3. esm
+    *    - ES Module 规范，export 导出，import 导入；
+    *    - 适用于浏览器，<script src="xxx" type="module">。
+    */
+   const outputFormat =
+     format === 'global' ? 'iife' : format === 'cjs' ? 'cjs' : 'esm'
+   
+   // 打包产物的文件名
+   const outputFile = `${targetPath}/dist/${target}.${format}.js`
+   
+   build({
+     entryPoints: [`${targetPath}/src/index.ts`],
+     outfile: outputFile,
+     bundle: true, // 将所有文件打包到一起
+     sourcemap: true,
+     format: outputFormat,
+     globalName: pkg.buildOptions.name,
+     platform: format === 'cjs' ? 'node' : 'browser',
+     watch: { // 监控文件变化
+       onRebuild(error) {
+         if (!error) {
+           console.log('正在重新打包。。。')
+         }
+       },
+     },
+   }).then(() => {
+     console.log('正在监测代码变化。。。')
+   })
+   
+   ```
+
+3. 配置 package 的 package.json 的打包配置信息
+
+   在打包的时候由于需要读取每个包的打包信息，所以需要在每个包的 package.json 文件中配置相关信息。
+
+   ```json
+   // packages/reactivity/package.json
+   {
+     "name": "@mini-vue/reactivity",
+   	...
+     "buildOptions": {
+       "name": "VueReactivity", // 当打包格式为 global 时，向浏览器暴露出的名称
+       "formats": [
+         "global",
+         "cjs",
+         "esm-bundler"
+       ]
+     }
+   }
+   
+   // packages/shared/package.json
+   {
+     "name": "@mini-vue/shared",
+     ...
+     "buildOptions": [ // 由于 shared 包只是作为共享包供其他包调用，所以一般不使用 global 格式
+       "cjs",
+       "esm-bundler"
+     ]
+   }
+   
+   ```
+
+4. 编写测试代码
+
+   ```typescript
+   // packages/shared/src/index.ts
+   export const isArray = (arr: unknown) => {
+     return Array.isArray(arr)
+   }
+   
+   // packages/reactivity/src/index.ts
+   import { isArray } from '@mini-vue/shared'
+   
+   console.log(isArray([]))
+   
+   ```
+
+   注意，如果直接从 `@mini-vue/shared` 中导入 `isArray` 方法会报错，因为 typescript 无法识别绝对路径 `@mini-vue/shared`，必须在根目录下创建 `tsconfig.json` 或执行命令 `pnpm tsc --init`，并写入以下配置：
+
+   ```json
+   {
+     ...
+     "baseUrl": './', // 当导入路径为非相对路径时的根目录
+     "paths": {
+       "@vue/*": ["packages/*/src"] // 指定 @vue/ 开头的路径匹配哪些文件
+     }
+   }
+   ```
+
+5. 测试打包
+
+   ```shell
+   pnpm run dev
+   ```
+
+   
 

@@ -326,5 +326,206 @@ pnpm install typescript minimist esbuild -D -w # minimist 用于读取命令行�
    pnpm run dev
    ```
 
-   
+
+
+---
+
+## Vue3 响应式原理
+
+### Vue3 响应式
+
+#### Vue3 对比 Vue2 的变化
+
+Vue2 实现响应式的不足：
+
+- Vue2 使用 defineProperty 来进行数据的劫持，需要对属性进行重写添加 getter 和 setter，**性能差**；
+- 当新增属性和删除属性时无法监控变化，需要通过 `$set`、`$delete` 实现；
+- 数组不采用 defineProperty 来进行劫持（浪费性能，对所有索引进行劫持会造成性能浪费），需要对数组进行单独处理。
+
+**Vue3 中使用 Proxy 来实现响应式数据的变化，从而解决了上述问题。**
+
+
+
+#### Composition API
+
+- Vue2 采用的是 Options API，用户提供 data，props，methods，computed，watch 等属性，但用户在编写复杂业务逻辑时会出现在项目代码中反复横跳的问题；
+- Vue2 中所有属性都是通过 this 访问，this 存在指向不明确的问题；
+- Vue2 中很多未使用方法或属性依旧会被打包，并且所有全局 API 都在 Vue 对象上公开。而 Composition API 对 tree-shaking 更加友好，代码也更容易压缩；
+- 组件逻辑共享问题，Vue2 采用 mixins 实现组件之间的逻辑共享，但是会有数据来源不明确、命名冲突等问题。而 Vue3 采用 Composition API 提取公共逻辑非常方便。
+
+
+
+### Reactive
+
+创建 `packages/reactivity/src/reactive.ts` 文件。
+
+#### 判断传入参数是否为对象
+
+```typescript
+// @ts-nocheck
+export function reactive(target) {
+  if (Object.prototype.toString.call(target) !== '[object Object]') return
+
+  ...
+}
+```
+
+
+
+#### Reflect
+
+```typescript
+// @ts-nocheck
+export function reactive(target) {
+  if (Object.prototype.toString.call(target) !== '[object Object]') return
+
+  const proxy = new Proxy(target, {
+    get(target, key, receiver) {
+      return Reflect.get(target, key, receiver)
+    },
+    set(target, key, value, receiver) {
+      return Reflect.set(target, key, value, receiver)
+    },
+  })
+  return proxy
+}
+```
+
+这里为何使用 Reflect 去实现对象属性的访问和修改？
+
+考虑以下这种情况：
+
+```typescript
+// @ts-nocheck
+export function reactive(target) {
+  if (Object.prototype.toString.call(target) !== '[object Object]') return
+
+  const proxy = new Proxy(target, {
+    get(target, key, receiver) {
+      console.log(key)
+      return target[key]
+    },
+    set(target, key, value, receiver) {
+      target[key] = value
+      return true
+    },
+  })
+  return proxy
+}
+
+const target = {
+  name: 'Tom',
+  get alias() {
+    return this.name
+  },
+}
+
+const r = reactive(target)
+r.alias
+```
+
+当我们通过 r 这个代理对象去访问 alias 这个属性时，可以发现打印了 key 一次。
+
+但是，在 alias 访问器函数中我们还通过 `this.name` 访问了对象的 name 属性，因此理论上需要打印两次 key。但现在的问题是，代理对象并没有监控到 `this.name`，因为是通过 this 即 target 这个对象访问的，所以不会执行 proxy 中的 get 函数，而使用 `Reflect.get(target, key, receiver)` 就可以将 this 指向到 proxy 代理对象上。
+
+因此，这里会使用 Reflect 去访问和修改对象的属性，这样就能监听所有属性的访问和修改。
+
+
+
+#### 将同一个对象进行缓存
+
+```typescript
+// @ts-noCheck
+const reactiveMap = new WeakMap() // WeakMap 中 key 只能为对象类型，且当 key 指向的对象置空时，映射的元素会被清空
+
+export function reactive(target) {
+  if (Object.prototype.toString.call(target) !== '[object Object]') return
+
+  if (reactiveMap.has(target)) {
+    return reactiveMap.get(target)
+  }
+
+  const proxy = new Proxy(target, {
+    get(target, key, receiver) {
+      return Reflect.get(target, key, receiver) // 将 target 的 this 指向到 receiver(Proxy) 上，监听属性的所有访问方式
+    },
+    set(target, key, value, receiver) {
+      return Reflect.set(target, key, value, receiver)
+    },
+  })
+
+  reactiveMap.set(target, proxy)
+
+  return proxy
+}
+
+const obj = {
+  name: 'Tom',
+  get alias() {
+    return this.name
+  },
+}
+
+const r1 = reactive(obj)
+const r2 = reactive(obj)
+console.log(r1 === r2) // true
+```
+
+
+
+#### 当传入对象为一个代理对象时
+
+```typescript
+// @ts-noCheck
+const reactiveMap = new WeakMap() // WeakMap 中 key 只能为对象类型，且当 key 指向的对象置空时，映射的元素会被清空
+
+enum ReactiveFlags {
+  IS_REACTIVE = '__v_isReactive',
+}
+
+export function reactive(target) {
+  if (Object.prototype.toString.call(target) !== '[object Object]') return
+
+  /**
+   * 实现当传入的 target 为普通对象时，返回生成的代理对象，如果为代理对象时，返回本身。
+   * 当 target 为普通对象时，由于没有创建 proxy，所以无法访问 getter，判断结果为 false；
+   * 当 target 为代理对象时，可以访问到 proxy 中的 getter，判断结果为 true。
+   */
+  if (target[ReactiveFlags.IS_REACTIVE]) {
+    return target
+  }
+
+  if (reactiveMap.has(target)) {
+    return reactiveMap.get(target)
+  }
+
+  const proxy = new Proxy(target, {
+    get(target, key, receiver) {
+      if (key === ReactiveFlags.IS_REACTIVE) {
+        return true
+      }
+      return Reflect.get(target, key, receiver) // 将 target 的 this 指向到 receiver(Proxy) 上，监听属性的所有访问方式
+    },
+    set(target, key, value, receiver) {
+      return Reflect.set(target, key, value, receiver)
+    },
+  })
+
+  reactiveMap.set(target, proxy)
+
+  return proxy
+}
+
+const obj = {
+  name: 'Tom',
+  get alias() {
+    return this.name
+  },
+}
+
+const r1 = reactive(obj)
+const r2 = reactive(obj)
+const r3 = reactive(r1)
+console.log(r1 === r3) // true
+```
 

@@ -332,6 +332,22 @@ pnpm install typescript minimist esbuild -D -w # minimist 用于读取命令行�
 
 ## Vue3 响应式原理
 
+### Vue2 响应式
+
+#### Object.defineProperty()
+
+- Vue2 使用 `Object.defineProperty()` 方法实现响应式。`Object.definePropety(obj, prop, descriptor)` 会直接在一个对象上定义一个新属性，或修改一个对象的现有属性，并返回此对象；
+- `Object.defineProperty()` 是劫持对象的属性，因此通过索引方式新增的元素不具备响应式，因为新增元素没有通过 `Object.defineProperty()` 绑定 getter/setter，要实现新增元素的响应式需要再次 `definedProperty`（Vue2 中 `vm.$set()` 的原理）。而 `Proxy` 劫持的是整个对象，不需要做特殊处理；
+- 虽然理论上可以通过 `Object.defineProperty()` 给数组的所有元素添加响应式，但出于性能考虑 Vue2 并没有这么做（当数组长度非常大时，需要遍历每一项添加 getter/setter，并且每触发一次 setter，都会触发所有元素的 getter，严重影响性能），而是通过 `数组变异` 重写数组方法；
+- 使用 `Object.defineProperty()` 时，我们修改原来的 `obj` 对象就可以触发拦截，而使用 `proxy`，就必须修改代理对象，即 `Proxy` 的实例才可以触发拦截。
+
+#### 参考
+
+- https://vue3js.cn/es6/#%E4%B8%BA%E4%BB%80%E4%B9%88%E8%A6%81%E7%94%A8proxy%E9%87%8D%E6%9E%84
+- https://segmentfault.com/a/1190000040238233
+
+
+
 ### Vue3 响应式
 
 #### Vue3 对比 Vue2 的变化

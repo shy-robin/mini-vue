@@ -1,7 +1,9 @@
 // @ts-noCheck
+import { mutableHandler } from './baseHandlers'
+
 const reactiveMap = new WeakMap() // WeakMap 中 key 只能为对象类型，且当 key 指向的对象置空时，映射的元素会被清空
 
-enum ReactiveFlags {
+export enum ReactiveFlags {
   IS_REACTIVE = '__v_isReactive',
 }
 
@@ -21,31 +23,9 @@ export function reactive(target) {
     return reactiveMap.get(target)
   }
 
-  const proxy = new Proxy(target, {
-    get(target, key, receiver) {
-      if (key === ReactiveFlags.IS_REACTIVE) {
-        return true
-      }
-      return Reflect.get(target, key, receiver) // 将 target 的 this 指向到 receiver(Proxy) 上，监听属性的所有访问方式
-    },
-    set(target, key, value, receiver) {
-      return Reflect.set(target, key, value, receiver)
-    },
-  })
+  const proxy = new Proxy(target, mutableHandler)
 
   reactiveMap.set(target, proxy)
 
   return proxy
 }
-
-const obj = {
-  name: 'Tom',
-  get alias() {
-    return this.name
-  },
-}
-
-const r1 = reactive(obj)
-const r2 = reactive(obj)
-const r3 = reactive(r1)
-console.log(r1 === r3) // true
